@@ -66,7 +66,6 @@ int main(int argc, char **argv) {
 		perror(MSG_ERR_CFGFILE);
 	}
 	printf("%s\n", MSG_VER_CFG);
-
 	signal(SIGINT, fsigint);
 
 	name_attach_t* pnat;
@@ -74,6 +73,7 @@ int main(int argc, char **argv) {
 	// Net
 	pnat = name_attach(NULL, SRV_NAME, NAME_FLAG_ATTACH_GLOBAL);
 	__ERROR_EXIT(pnat, NULL, "name_attach");
+
 	// chid = pnat->chid;
 
 	cash_t *pcash;
@@ -117,6 +117,7 @@ int main(int argc, char **argv) {
 	wrk_info.wrk_amount = wrk_amount;
 	// wrk_info.proute = proute;
 	wrk_info.psync = psync;
+
 	// if(slave.amount > 0) {
 	// 	for(size_t i = 0; i<wrk_amount; ++i) {
 	// 		wrk_info.id = i;
@@ -131,7 +132,6 @@ int main(int argc, char **argv) {
 	printf("%s\n", MSG_VER_WORK);
 //*****************************************************************************
 	while(working) {
-		log_update();
 		sleep(1);
 	}
 //*****************************************************************************
@@ -151,7 +151,6 @@ int main(int argc, char **argv) {
 	free(pworker);
 	free(psync);
 	// free(proute);
-	log_update();
 	return EXIT_SUCCESS;
 }
 
@@ -207,9 +206,10 @@ void *worker(void *v) {
 	// int result;
 	// struct sigevent clientevent, timeoutevent;
 	// struct sigaction timeoutact;
-	iov_t *pheader;
+	iov_t pheader;
 	frame_t frame;
 	// timer_t timer;
+
 	syncsig_t *psync = &wrk_info.psync[wrk_info.id];
 	// struct itimerspec timeout, stoptimeout;
 
@@ -223,7 +223,7 @@ void *worker(void *v) {
 	// timeout.it_value.tv_nsec = 0;
 	// stoptimeout = timeout;
 	// sem_init(&psync->sem, 0, 1);
-	SETIOV(pheader, &frame, sizeof(frame_t));
+	SETIOV(&pheader, &frame, sizeof(frame_t));
 	// SIGEV_SIGNAL_VALUE_INIT(&timeoutevent, SIGUSR1, psync);
 	// __ERROR_CHECK(timer_create(CLOCK_MONOTONIC, &timeoutevent, &timer),-1,"timer_create");
 	// __ERROR_CHECK(signal(SIGUSR1, wrk_sigusr1),-1,"signal");
@@ -231,7 +231,7 @@ void *worker(void *v) {
 	while(true) {
 		psync->rcvid = -1;
 		wrk_info.psync[wrk_info.id].status = READY;
-		psync->rcvid = MsgReceivev(wrk_info.chid, pheader, 1, NULL);
+		psync->rcvid = MsgReceivev(wrk_info.chid, &pheader, 1, NULL);
 		__ERROR_CONT(psync->rcvid, -1, MSG_ERR_MSGREC);
 		wrk_info.psync[wrk_info.id].status = WORK;
 		if( psync->rcvid == 0 ) {
@@ -297,65 +297,3 @@ void *worker(void *v) {
 		}
 	}
 }
-
-// void *router(void *v) {
-// 	wrk_info_t wrk_info = *(wrk_info_t*)v;
-// 	int result, rcvid;
-// 	iov_t *piov, header;
-// 	frame_t frame;
-// 	size_t i;
-
-// 	SETIOV(&header, &frame, sizeof(frame_t));
-
-// 	while(true) {
-// 		rcvid = MsgReceivev(wrk_info.chid, &header, 1, NULL);
-// 		printf("rcvid %i\n", rcvid);
-// 		__ERROR_CONT(rcvid, -1, MSG_ERR_MSGREC);
-// 		if(0 == rcvid) {
-// 			switch(frame.header.code) {
-// 			case _PULSE_CODE_DISCONNECT:
-// 				printf("Client has gone\n");
-// 				break;
-// 			default:
-// 				break;
-// 			}
-// 		} else {
-// 			if (frame.header.type == _IO_CONNECT) {
-// 				printf("Send OK\n");
-// 				frame_reply(rcvid, NULL);
-// 				continue;
-// 			}
-// 			if(frame.protocol == STANDART) {
-// 				__ERROR_CHECK(MsgError(rcvid, ENOTSUP),-1,MSG_ERR_MSGERR);
-// 				continue;
-// 			}
-// 			printf("Thread %i, client %i\n", wrk_info.id, frame.cid);
-// 			if(frame.protocol == NOREPLY) {
-// 				for(i=0; i<wrk_info.pslave->amount; ++i) {
-// 					if(FULL != wrk_info.pslave->pslave[i].status) {
-// 						if(0 == sem_trywait(&wrk_info.pslave->pslave[i].sem)) {
-// 							wrk_info.pslave->pslave[i].clientnow ++;
-// 							if(wrk_info.pslave->pslave[i].clientnow ==
-// 									wrk_info.pslave->pslave[i].clientmax) {
-// 								wrk_info.pslave->pslave[i].status = FULL;
-// 							}
-// 							sem_post(&wrk_info.pslave->pslave[i].sem);
-// 							break;
-// 						}
-// 					}
-// 				}
-// 				if(i == wrk_info.pslave->amount) {
-// 					__ERROR_CHECK(MsgError(rcvid, EAGAIN),-1,MSG_ERR_MSGERR);
-// 					continue;
-// 				}
-// 				frame_datareceive(rcvid, &frame);
-// 				frame_reply(rcvid, NULL);
-// 				__ERROR_CHECK(frame_send(wrk_info.pslave->pslave[i].coid, &frame, NULL), -1, "sendv");
-// 			}
-// 		}
-// 	}
-// }
-
-// void *slavelistener(void *v) {
-// 	/*Under construction*/
-// }

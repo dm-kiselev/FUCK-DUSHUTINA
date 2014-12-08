@@ -155,9 +155,9 @@ int main(int argc, char **argv) {
 		// frame.protocol = NOREPLY;
 		//__ERROR_CHECK(frame_send(srv_coid, &frame, &rframe), -1, "sendv");
 		// clock_gettime(CLOCK_MONOTONIC, &stime);
-		// trace_msg_start();
+		trace_msg_start();
 		__ERROR_CONT(frame_send(srv_coid, &frame, NULL), -1, "sendv");
-		__ERROR_CHECK(MsgReceivePulse(rec_chid, &pulse, sizeof( pulse ), NULL), -1, "MsgReceivePulse");
+		//__ERROR_CHECK(MsgReceivePulse(rec_chid, &pulse, sizeof( pulse ), NULL), -1, "MsgReceivePulse");
 		// frame.protocol = REPLY;
 		__ERROR_CONT(frame_send(srv_coid, &frame, &rframe), -1, "sendv");
 		trace_msg_stop();
@@ -172,8 +172,9 @@ int main(int argc, char **argv) {
 		// 	}
 		// }
 		//printf("R#%i: %f %f %f\n", i, psig[n], *(double_t*)rframe.ptask->px, psig[n+SIZE-1]);
-		// fprintf(pfile, "%f  %f  %u  %u\n", psig[n], *(double_t*)rframe.ptask->px,
+		 fprintf(pfile, "%f  %f  %u  %u\n", psig[n], *(double_t*)rframe.ptask->px,
 				etime.tv_sec-stime.tv_sec, etime.tv_nsec-stime.tv_nsec);
+		 printf("I receive data\n");
 	}
 	// frame.protocol = STANDART;
 	frame.ptask[0].cmd = SPLINE_DESTROY;

@@ -5,7 +5,6 @@
 #include "datatypes.h"
 #include <errno.h>
 #include <inttypes.h>
-#include "logger.h"
 #include <math.h>
 #include <process.h>
 #include <pthread.h>
