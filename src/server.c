@@ -1,172 +1,361 @@
+#include "includes.h"
+#include "net.h"
 
-#include "common.h"
+volatile bool working = true;	// server works while it's true
+void* worker(void* v);			// agent
+// void* router(void* v);
+void wrk_sigusr1(int signo, siginfo_t *info, void *other);	// handler for SIGUSR1
+// int chid;						// channel ID
 
-static void gotAPulse(void);
-static void gotAMessage( int rcvid, ClientMessageT *msg );
+void fsigint(int i);			// handler for SIGINT that stops the server
+int processtask(task_t *ptask, task_t *ptaskt, spline_t *pspline);
+//int connectslaves(slave_t *pslave);
+int main(int argc, char **argv) {
+//*****************************************************************************
+	FILE *pfcfg;
+	// sem_t wrk_sem;
+	// sem_t *pwrk_sem = &wrk_sem;
+	// struct timespec wait_wrk_sem;
+	// size_t i, wrk_amount = CLIENT_MAX, client_max = CLIENT_MAX;
+	// frame_t frame;
+	// iov_t *piov, *pheader;
+	// pheader = malloc(sizeof(iov_t));
+	// SETIOV(pheader, &frame, sizeof(frame_t));
+	// char buf[BUFFER_SIZE], cmd[BUFFER_SIZE], param[BUFFER_SIZE];
+	// int rcvid, slave_chid;
+	// char srv_name[BUFFER_SIZE] = SRV_NAME;
+	size_t wrk_amount = CLIENT_MAX, client_max = CLIENT_MAX;
 
-void main( int argc, char *argv[] ) {
-	
-	unsigned int flag = NAME_FLAG_ATTACH_GLOBAL;
-	
-	// Register server name in the global namespace and create a channel
-	name_attach_t * msg_channel = name_attach( NULL, srvName, flag );
-	if( msg_channel == NULL ) {
-		cerr << srvName << ": name attach error!" << endl;
-		exit(EXIT_FAILURE);
+	// Slave support
+	// slave_t slave;
+	// slave.amount = 0;
+	// uint32_t *proute;
+//*****************************************************************************
+	// Configs
+	printf("%s\n", MSG_VER_START);
+	// wait_wrk_sem.tv_nsec = WRK_SEM_TIMEOUT;
+	// wait_wrk_sem.tv_sec = 0;
+	if( argc > 1 ) {
+		pfcfg = fopen(argv[1], "r");
+	} else {
+		pfcfg = fopen(FILE_NAME_CFG, "r");
 	}
-	int chid = msg_channel->chid;	// channel ID
-	MessageT msg;					// message buffer
-	
-	// if the name registered globally we should receive a message
-	// and reply to it after registering
-	int rcvid = MsgReceive( chid, &msg, sizeof(msg), NULL);
-	MsgReply( rcvid, 0, &msg, sizeof(msg));
+	if( pfcfg ) {
+		char cmd[BUFFER_SIZE], param[BUFFER_SIZE];
+		while( !feof(pfcfg) ) {
+			fscanf(pfcfg, "%s %s", cmd, param);
+			if(0 == strcmp(cmd, CFG_PAR_WRKAM)) {
+				wrk_amount = atoi(param);
+			}
+			// else if(0 == strcmp(cmd, CFG_PAR_WRKSEMTIME)) {
+			// 	wait_wrk_sem.tv_nsec = atol(param);
+			// }
+			// else if(0 == strcmp(cmd, CFG_PAR_MASTER)) {
+			// 	slave.amount = atoi(param);
+			// }
+			// else if(0 == strcmp(cmd, CFG_PAR_SLAVE)) {
+			// 	strcpy(srv_name, SLAVE_NAME);
+			// 	strcat(srv_name, param);
+			// }
+			else if(0 == strcmp(cmd, CFG_PAR_CLIENTMAX)) {
+				client_max = atoi(param);
+			}
+		}
+		fclose(pfcfg);
+	} else {
+		perror(MSG_ERR_CFGFILE);
+	}
+	printf("%s\n", MSG_VER_CFG);
 
-    // create a connection back to ourselves
-    int coid = name_open( srvName, 0 );
-    if (coid == -1) {
-    	cerr << srvName << ": cannot connect to myself!" << endl;
-        exit(EXIT_FAILURE);
-    }
+	signal(SIGINT, fsigint);
 
-    struct sigevent event;      // Structure that describes an event
-    // The initialization macro for sigevent structure
-    SIGEV_PULSE_INIT( &event, coid, SIGEV_PULSE_PRIO_INHERIT, TIMER_CODE, 0);
+	name_attach_t* pnat;
 
-    timer_t timerID;
+	// Net
+	pnat = name_attach(NULL, SRV_NAME, NAME_FLAG_ATTACH_GLOBAL);
+	__ERROR_EXIT(pnat, NULL, "name_attach");
+	// chid = pnat->chid;
 
-    // create the timer and binding it to the event
-    if( timer_create( CLOCK_REALTIME, &event, &timerID) == -1 ) {
-    	cerr << srvName << ": cannot create a timer" << endl;
-        exit(EXIT_FAILURE);
-    }
+	cash_t *pcash;
 
-    struct itimerspec timer_spec;      // the timer data structure
-    
-    // setup the timer (1s delay, 1s reload)
-    timer_spec.it_value.tv_sec = 1;
-    timer_spec.it_value.tv_nsec = 0;
-    timer_spec.it_interval.tv_sec = 1;
-    timer_spec.it_interval.tv_nsec = 0;
+	// Cash
+	pcash = malloc(sizeof(cash_t)*client_max);
+	// proute = malloc(sizeof(uint32_t)*CLIENT_MAX);
+	// Slaves
+	// if(slave.amount > 0) {
+	// 	slave.pslave = malloc(sizeof(slave_info_t)*slave.amount);
+	// 	for(int i = 0; i< slave.amount; ++i) {
+	// 		slave.pslave[i].name = malloc(sizeof(char)*BUFFER_SIZE);
+	// 		strcpy(slave.pslave[i].name, SLAVE_NAME);
+	// 		itoa(i, buf, 10);
+	// 		strcat(slave.pslave[i].name, buf);
+	// 		slave.pslave[i].status = DOWN;
+	// 		slave.pslave[i].clientmax = CLIENT_MAX;
+	// 		slave.pslave[i].clientnow = 0;
+	// 		sem_init(&slave.pslave[i].sem, 0, 1);
+	// 	}
+	// 	connectslaves(&slave);
+	// 	slave_chid = ChannelCreate(0);
+	// 	__ERROR_EXIT(slave_chid, -1, "ChannelCreate");
+	// }
 
-    // and start it!
-    timer_settime( timerID, 0, &timer_spec, NULL );
 
-    while() {
-    	rcvid = MsgReceive( chid, &msg, sizeof(msg), NULL);
-    	if( rcvid == 0 ) gotAPulse();
-    	else gotAMessage( rcvid, &msg.msg );
-    }
-    
+	syncsig_t *psync;
+	pthread_t *pworker;
+
+	// Workers
+	// __ERROR_EXIT(sem_init(pwrk_sem, 0, 0), -1, "pwrk_sem: sem_init");
+	psync = malloc(sizeof(syncsig_t)*wrk_amount);
+	pworker = malloc(sizeof(pthread_t)*wrk_amount);
+
+	wrk_info_t wrk_info;
+	// wrk_info.psem = pwrk_sem;
+	wrk_info.chid = pnat->chid;
+	wrk_info.pcash = pcash;
+	// wrk_info.pslave = &slave;
+	wrk_info.client_amount = client_max;
+	wrk_info.wrk_amount = wrk_amount;
+	// wrk_info.proute = proute;
+	wrk_info.psync = psync;
+	// if(slave.amount > 0) {
+	// 	for(size_t i = 0; i<wrk_amount; ++i) {
+	// 		wrk_info.id = i;
+	// 		pthread_create(&pworker[i], NULL, router, &wrk_info);
+	// 	}
+	// } else {
+		for(size_t i = 0; i<wrk_amount; ++i) {
+			wrk_info.id = i;
+			pthread_create(&pworker[i], NULL, worker, &wrk_info);
+		}
+	// }
+	printf("%s\n", MSG_VER_WORK);
+//*****************************************************************************
+	while(working) {
+		log_update();
+		sleep(1);
+	}
+//*****************************************************************************
+	for(size_t i = 0; i<wrk_amount; ++i) {
+		pthread_kill(pworker[i], SIGKILL);
+	}
+	for(size_t i = 0; i<wrk_amount; ++i) {
+		pthread_join(pworker[i], NULL);
+	}
+	// if(slave.amount > 0) {
+	// 	for(size_t i = 0; i<slave.amount; ++i) {
+	// 		free(slave.pslave[i].name);
+	// 	}
+	// 	free(slave.pslave);
+	// }
+	name_detach(pnat, NULL);
+	free(pworker);
+	free(psync);
+	// free(proute);
+	log_update();
+	return EXIT_SUCCESS;
 }
 
-// clients table
-struct clients {
-    int rcvid;              // receive ID of client
-    int timeout;            // timeout left for client
-	clients *next;			// pointer to the next client
-};
+// int connectslaves(slave_t *pslave) {
+// 	for(int i=0; i<pslave->amount; ++i) {
+// 		if((pslave->pslave[i].coid != ConnectServerInfo(0, pslave->pslave[i].coid, NULL))
+// 			|| (pslave->pslave[i].status == DOWN)) {
+// 			pslave->pslave[i].coid = name_open(pslave->pslave[i].name, NAME_FLAG_ATTACH_GLOBAL);
+// 			pslave->pslave[i].clientnow = 0;
+// 			if(pslave->pslave[i].coid == -1) {
+// 				perror(pslave->pslave[i].name);
+// 				pslave->pslave[i].status = DOWN;
+// 			} else {
+// 				pslave->pslave[i].status = READY;
+// 			}
+// 		}
+// 	}
+// 	return EXIT_SUCCESS;
+// }
 
-clients *current;
-clients *head;
-clients *tail;
-
-/*
- *  This routine is called whenever a message arrives.  We
- *  look at the type of message (either a "wait for data"
- *  message, or a "here's some data" message), and act
- *  accordingly.  For simplicity, we'll assume that there is
- *  never any data waiting.  See the text for more discussion
- *  about this.
-*/
-
-void gotAMessage( int rcvid, ClientMessageT *msg ) {
-
-	ClientMessageT msg2;
-    // determine the kind of message that it is
-    switch( msg->messageType ) {
-
-    // client wants to wait for data
-    case    MT_WAIT_DATA:
-
-		if( !current ) {		// if there are no clients
-			current = (clients *)malloc(sizeof(clients));
-			head = current;
-		}
-		else {
-			current->next = (clients *)malloc(sizeof(clients));
-			current = current->next;
-		}
-		current->rcvid = rcvid;
-		current->timeout = 5;
-		current->next = NULL;
-		tail = current;
+int processtask(task_t *ptask, task_t *prep, spline_t *pspline) {
+	prep->cmd = ptask->cmd;
+	switch(ptask->cmd) {
+	case SPLINE_INIT:
+		spline_init(pspline, (double_t*)ptask->px,
+					(double_t*)ptask->px + ptask->n/(sizeof(double_t)*2),
+						ptask->n/(sizeof(double_t)*2));
 		break;
-
-    // client with data
-    case    MT_SEND_DATA:
-
-		current = head;
-		if( current ) {
-			
-                // reply to BOTH CLIENTS!
-
-                msg2.data = msg->data;
-				msg2.messageType = MT_OK;
-                MsgReply( rcvid, EOK, &msg2, sizeof(msg2) );
-                MsgReply( current->rcvid, EOK, &msg2, sizeof(msg2) );
-				head = current->next;
-				free(current);
-				current = NULL;
-		}
-		else {
-        msg2.messageType = MT_ERROR;
-		MsgReply( rcvid, EOK, &msg2, sizeof(msg2));
-        fprintf (stderr, "Table empty, message from rcvid %d ignored, "
-                         "client answered error\n", rcvid);
-		}
-    }
+	case SPLINE_DESTROY:
+		spline_destroy(pspline);
+		break;
+	case SPLINE_GETVAL:
+		spline_getvaluev(pspline, (double_t*)ptask->px,
+						(double_t*)prep->px, ptask->n/sizeof(double_t));
+		break;
+	}
+	return 0;
 }
 
-/*
- *  This routine is responsible for handling the fact that a
- *  timeout has occurred.  It runs through the list of clients
- *  to see which client has timed out, and replies to it with
- *  a timed-out response.
- */
-void gotAPulse() {
-    ClientMessageT  msg;
-    int             i=0;
-	clients * buf;
-	
-    // prepare a response message
-    msg.messageType = MT_TIMEOUT;
+void fsigint (int i) {
+	working = false;
+}
 
+// void wrk_sigusr1 (int signo, siginfo_t *info, void *other) {
+// 	syncsig_t *psync = (syncsig_t*)SIGEV_GET_VALUE(info);
+// 	sem_wait(&psync->sem);
+// 	__ERROR_CHECK(MsgError(psync->rcvid, ETIME),-1,MSG_ERR_MSGERR);
+// 	sem_post(&psync->sem);
+// }
 
-   current = head;
-   buf = current;
-   while(current) {
-      if( --current->timeout == 0 ) {
-          // send a reply
-          MsgReply( current->rcvid, EOK, &msg, sizeof(msg) );
-		  printf("Client %d timeout\n", i);
+void *worker(void *v) {
+	wrk_info_t wrk_info = *(wrk_info_t*)v;
+	// int result;
+	// struct sigevent clientevent, timeoutevent;
+	// struct sigaction timeoutact;
+	iov_t *pheader;
+	frame_t frame;
+	// timer_t timer;
+	syncsig_t *psync = &wrk_info.psync[wrk_info.id];
+	// struct itimerspec timeout, stoptimeout;
 
-         if (!i) {
-			head = current->next;
-			free(current);
-			current = head;
-		 }
-		 else {
-			buf->next = current->next;
-			free(current);
-			current = buf->next;
-		 }
-      }
-      else {
-		buf = current;
-		current = current->next ;
-	  }
-	  i++;
+	// struct timespec slp;
+	// slp.tv_nsec = 10000000;
+	// slp.tv_sec = 0;
+
+	// timeout.it_interval.tv_sec = 0;
+	// timeout.it_interval.tv_nsec = 0;
+	// timeout.it_value.tv_sec = 0;
+	// timeout.it_value.tv_nsec = 0;
+	// stoptimeout = timeout;
+	// sem_init(&psync->sem, 0, 1);
+	SETIOV(pheader, &frame, sizeof(frame_t));
+	// SIGEV_SIGNAL_VALUE_INIT(&timeoutevent, SIGUSR1, psync);
+	// __ERROR_CHECK(timer_create(CLOCK_MONOTONIC, &timeoutevent, &timer),-1,"timer_create");
+	// __ERROR_CHECK(signal(SIGUSR1, wrk_sigusr1),-1,"signal");
+
+	while(true) {
+		psync->rcvid = -1;
+		wrk_info.psync[wrk_info.id].status = READY;
+		psync->rcvid = MsgReceivev(wrk_info.chid, pheader, 1, NULL);
+		__ERROR_CONT(psync->rcvid, -1, MSG_ERR_MSGREC);
+		wrk_info.psync[wrk_info.id].status = WORK;
+		if( psync->rcvid == 0 ) {
+			switch(frame.header.code) {
+			case _PULSE_CODE_DISCONNECT:
+				printf("Client has gone\n");
+				break;
+			case _PULSE_CODE_UNBLOCK:
+				printf("_PULSE_CODE_UNBLOCK\n");
+				for(size_t i=0; i<wrk_info.wrk_amount; ++i) {
+					if(wrk_info.psync[i].rcvid == frame.header.value.sival_int) {
+						if(wrk_info.psync[i].status != SEND) {
+							__ERROR_CHECK(MsgError(frame.header.value.sival_int, ETIME),-1,MSG_ERR_MSGERR);
+						}
+						break;
+					}
+				}
+			// 	break;
+			// default:
+			// 	break;
+			}
+		} else {
+			if (frame.header.type == _IO_CONNECT) {
+				printf("Send OK\n");
+				frame_reply(psync->rcvid, NULL);
+				continue;
+			}
+			// wrk_info.proute[frame.cid] = wrk_info.id;
+			// timeout.it_value = frame.timeout;
+			// sem_wait(&psync->sem);
+			// if(frame.protocol != REPLY) {
+			// 	__ERROR_CHECK(timer_settime(timer, 0, &timeout, NULL),-1,"timer_settime");
+			// }
+			frame_datareceive(psync->rcvid, &frame);
+			// sem_post(&psync->sem);
+			// nanosleep( &slp, NULL);
+
+			// if(frame.protocol == NOREPLY) {
+			// 	SIGEV_PULSE_INIT( &clientevent, frame.coid,
+			// 						SIGEV_PULSE_PRIO_INHERIT, PULSE_CODE_DATA_READY, 0);
+			// 	frame_reply(psync->rcvid, NULL);
+			// }
+			// if(frame.protocol != REPLY) {
+				frame_repinit(&frame, &wrk_info.pcash[frame.cid].framerep);
+				for(size_t i=0; i<frame.size; ++i) {
+					processtask(frame.ptask+i, wrk_info.pcash[frame.cid].framerep.ptask+i,
+							&wrk_info.pcash[frame.cid].spline);
+				}
+				// __ERROR_CHECK(timer_settime(timer, 0, &stoptimeout, NULL),-1,"timer_settime");
+			// }
+
+			wrk_info.psync[wrk_info.id].status = SEND;
+			// if(frame.protocol == NOREPLY) {
+			// 	result = -1;
+			// 	for(int i=0; i<3 && result == -1; ++i) {
+			// 		result = MsgDeliverEvent(psync->rcvid, &clientevent);
+			// 		__ERROR_CHECK(result, -1, "MsgDeliverEvent");
+			// 	}
+			// } else {
+				frame_reply(psync->rcvid, &wrk_info.pcash[frame.cid].framerep);
+				frame_destroy(&wrk_info.pcash[frame.cid].framerep);
+			// }
+		}
 	}
 }
 
+// void *router(void *v) {
+// 	wrk_info_t wrk_info = *(wrk_info_t*)v;
+// 	int result, rcvid;
+// 	iov_t *piov, header;
+// 	frame_t frame;
+// 	size_t i;
+
+// 	SETIOV(&header, &frame, sizeof(frame_t));
+
+// 	while(true) {
+// 		rcvid = MsgReceivev(wrk_info.chid, &header, 1, NULL);
+// 		printf("rcvid %i\n", rcvid);
+// 		__ERROR_CONT(rcvid, -1, MSG_ERR_MSGREC);
+// 		if(0 == rcvid) {
+// 			switch(frame.header.code) {
+// 			case _PULSE_CODE_DISCONNECT:
+// 				printf("Client has gone\n");
+// 				break;
+// 			default:
+// 				break;
+// 			}
+// 		} else {
+// 			if (frame.header.type == _IO_CONNECT) {
+// 				printf("Send OK\n");
+// 				frame_reply(rcvid, NULL);
+// 				continue;
+// 			}
+// 			if(frame.protocol == STANDART) {
+// 				__ERROR_CHECK(MsgError(rcvid, ENOTSUP),-1,MSG_ERR_MSGERR);
+// 				continue;
+// 			}
+// 			printf("Thread %i, client %i\n", wrk_info.id, frame.cid);
+// 			if(frame.protocol == NOREPLY) {
+// 				for(i=0; i<wrk_info.pslave->amount; ++i) {
+// 					if(FULL != wrk_info.pslave->pslave[i].status) {
+// 						if(0 == sem_trywait(&wrk_info.pslave->pslave[i].sem)) {
+// 							wrk_info.pslave->pslave[i].clientnow ++;
+// 							if(wrk_info.pslave->pslave[i].clientnow ==
+// 									wrk_info.pslave->pslave[i].clientmax) {
+// 								wrk_info.pslave->pslave[i].status = FULL;
+// 							}
+// 							sem_post(&wrk_info.pslave->pslave[i].sem);
+// 							break;
+// 						}
+// 					}
+// 				}
+// 				if(i == wrk_info.pslave->amount) {
+// 					__ERROR_CHECK(MsgError(rcvid, EAGAIN),-1,MSG_ERR_MSGERR);
+// 					continue;
+// 				}
+// 				frame_datareceive(rcvid, &frame);
+// 				frame_reply(rcvid, NULL);
+// 				__ERROR_CHECK(frame_send(wrk_info.pslave->pslave[i].coid, &frame, NULL), -1, "sendv");
+// 			}
+// 		}
+// 	}
+// }
+
+// void *slavelistener(void *v) {
+// 	/*Under construction*/
+// }
