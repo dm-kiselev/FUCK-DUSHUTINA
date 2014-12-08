@@ -1,2 +1,1 @@
-wrk_amount 3
-master 3
+wrk_amount 6

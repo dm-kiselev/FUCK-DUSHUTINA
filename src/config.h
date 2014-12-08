@@ -25,9 +25,6 @@
 #define MSG_ERR_MSGERR "MsgError"
 
 #define CFG_PAR_WRKAM "wrk_amount"
-// #define CFG_PAR_WRKSEMTIME "wait_wrk_sem"
-// #define CFG_PAR_MASTER "master"
-// #define CFG_PAR_SLAVE "slave"
 #define CFG_PAR_CLIENTMAX "client_max"
 
 #endif /* CONFIG_H_ */
