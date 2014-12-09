@@ -27,13 +27,10 @@ typedef enum {
 } cmd_t;
 
 typedef enum {
-	DOWN,
 	READY,
 	WORK,
-	FULL,
+	LATE,
 	SEND,
-	ERR,
-	EMPTY
 } status_t;
 
 typedef struct {
@@ -69,6 +66,5 @@ typedef struct {
 	syncsig_t* psync;
 	int chid;
 } wrk_info_t;			// structure that describes a works
-// Public functions
 
 #endif /* DATATYPES_H_ */

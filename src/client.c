@@ -92,6 +92,7 @@ int main(int argc, char **argv) {
 
 	__ERROR_CHECK(TimerTimeout(CLOCK_REALTIME, _NTO_TIMEOUT_SEND | _NTO_TIMEOUT_REPLY,
 									NULL, &timeoutsend, NULL), -1, "TimerTimeout");
+	// send init data about spline
 	__ERROR_CHECK(frame_send(srv_coid, &frame, &rframe), -1, "sendv");
 	frame_destroy(&rframe);
 	free(frame.ptask);
@@ -107,7 +108,7 @@ int main(int argc, char **argv) {
 		n = rand()%(SIZE-1);
 		frame.ptask[0].px = (void*)&psig[n];
 		trace_msg_start();
-		__ERROR_CONT(frame_send(srv_coid, &frame, NULL), -1, "sendv");
+		// send tasks to server and wait for results
 		__ERROR_CONT(frame_send(srv_coid, &frame, &rframe), -1, "sendv");
 		trace_msg_stop();
 		clock_gettime(CLOCK_MONOTONIC, &etime);
@@ -119,6 +120,7 @@ int main(int argc, char **argv) {
 	frame.ptask[0].n = 0;
 	frame.ptask[0].px = 0;
 	frame.fid++;
+	// say server to destroy our spline
 	__ERROR_CHECK(frame_send(srv_coid, &frame, &rframe), -1, "sendv");
 	fclose(pfile);
 	frame_destroy(&rframe);

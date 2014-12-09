@@ -3,18 +3,21 @@
 
 volatile bool working = true;	// server works while it's true
 void* worker(void* v);			// agent
-void wrk_sigusr1(int signo, siginfo_t *info, void *other);	// handler for SIGUSR1
 
 void fsigint(int i);			// handler for SIGINT that stops the server
 int processtask(task_t *ptask, task_t *ptaskt, spline_t *pspline);
+
 int main(int argc, char **argv) {
-//*****************************************************************************
-	FILE *pfcfg;
-	size_t wrk_amount = CLIENT_MAX, client_max = CLIENT_MAX;
 
 //*****************************************************************************
-	// Configs
+	FILE *pfcfg;		// server config file descriptor
+	size_t	wrk_amount = CLIENT_MAX,	// amount of agents
+			client_max = CLIENT_MAX;	// max available amount of clients
+//*****************************************************************************
+
 	printf("%s\n", MSG_VER_START);
+
+	// reading server configuration from file
 	if( argc > 1 ) {
 		pfcfg = fopen(argv[1], "r");
 	} else {
@@ -35,27 +38,23 @@ int main(int argc, char **argv) {
 	} else {
 		perror(MSG_ERR_CFGFILE);
 	}
+
 	printf("%s\n", MSG_VER_CFG);
+
+	// set handler for SIGINT1
 	signal(SIGINT, fsigint);
 
-	name_attach_t* pnat;
-
-	// Net
-	pnat = name_attach(NULL, SRV_NAME, NAME_FLAG_ATTACH_GLOBAL);
+	// Register a server name and create a channel
+	name_attach_t* pnat = name_attach(NULL, SRV_NAME, NAME_FLAG_ATTACH_GLOBAL);
+	// if( pnat == NULL ) { perror("name_attach"); return EXIT_FAILURE; }
 	__ERROR_EXIT(pnat, NULL, "name_attach");
 
-	cash_t *pcash;
+	// allocate memory for clients cash
+	cash_t *pcash = malloc(sizeof(cash_t)*client_max);
 
-	// Cash
-	pcash = malloc(sizeof(cash_t)*client_max);
+	syncsig_t *psync = malloc(sizeof(syncsig_t)*wrk_amount);
 
-
-	syncsig_t *psync;
-	pthread_t *pworker;
-
-	// Workers
-	psync = malloc(sizeof(syncsig_t)*wrk_amount);
-	pworker = malloc(sizeof(pthread_t)*wrk_amount);
+	pthread_t *pworker = malloc(sizeof(pthread_t)*wrk_amount);
 
 	wrk_info_t wrk_info;
 	wrk_info.chid = pnat->chid;
@@ -64,10 +63,11 @@ int main(int argc, char **argv) {
 	wrk_info.wrk_amount = wrk_amount;
 	wrk_info.psync = psync;
 
-		for(size_t i = 0; i<wrk_amount; ++i) {
-			wrk_info.id = i;
-			pthread_create(&pworker[i], NULL, worker, &wrk_info);
-		}
+	for(size_t i = 0; i<wrk_amount; ++i) {
+		wrk_info.id = i;
+		pthread_create(&pworker[i], NULL, worker, &wrk_info);
+	}
+
 	printf("%s\n", MSG_VER_WORK);
 //*****************************************************************************
 	while(working) {
@@ -83,6 +83,7 @@ int main(int argc, char **argv) {
 	name_detach(pnat, NULL);
 	free(pworker);
 	free(psync);
+	free(pcash);
 	return EXIT_SUCCESS;
 }
 
@@ -110,12 +111,20 @@ void fsigint (int i) {
 }
 
 void *worker(void *v) {
-	wrk_info_t wrk_info = *(wrk_info_t*)v;
-	iov_t pheader;
-	frame_t frame;
 
+	// duplicate wrk_info from the main thread
+	// это не самая лучшая реализация, потому что, если главный поток перейдёт на следующую итерацию цикла
+	// и успеет инкрементировать wrk_info.id прежде, чем рабочий поток сохранит у себя копию этой структуры,
+	// то у этого потока будет совсем не тот id, который должен быть.
+	// возможно появление нескольких потоков с одинаковым id
+	wrk_info_t wrk_info = *(wrk_info_t*)v;
 	syncsig_t *psync = &wrk_info.psync[wrk_info.id];
-	SETIOV(&pheader, &frame, sizeof(frame_t));
+
+	iov_t pheader;		// this is for MsgReceivev function
+	frame_t frame;		// this is for our message
+
+	SETIOV(&pheader, &frame, sizeof(frame_t));		// this is a kind of magic
+
 	while(true) {
 		psync->rcvid = -1;
 		wrk_info.psync[wrk_info.id].status = READY;
@@ -124,36 +133,44 @@ void *worker(void *v) {
 		wrk_info.psync[wrk_info.id].status = WORK;
 		if( psync->rcvid == 0 ) {
 			switch(frame.header.code) {
+			// server receives this pulse from OS when client call name_close function
 			case _PULSE_CODE_DISCONNECT:
 				printf("Client has gone\n");
 				break;
+			// server receives this pulse from OS when client is too long in SEND- or REPLY-blocked state
+			// see also TimerTimeout call in client.c
 			case _PULSE_CODE_UNBLOCK:
 				printf("_PULSE_CODE_UNBLOCK\n");
 				for(size_t i=0; i<wrk_info.wrk_amount; ++i) {
 					if(wrk_info.psync[i].rcvid == frame.header.value.sival_int) {
 						if(wrk_info.psync[i].status != SEND) {
+							// if client wants to unblock and results are not ready yet, reply client with error
 							__ERROR_CHECK(MsgError(frame.header.value.sival_int, ETIME),-1,MSG_ERR_MSGERR);
+							wrk_info.psync[i].status = LATE;
 						}
 						break;
 					}
 				}
 			}
 		} else {
+			// server receives this message from OS when client call name_open function
 			if (frame.header.type == _IO_CONNECT) {
 				printf("Send OK\n");
 				frame_reply(psync->rcvid, NULL);
 				continue;
 			}
-			frame_datareceive(psync->rcvid, &frame);
-				frame_repinit(&frame, &wrk_info.pcash[frame.cid].framerep);
-				for(size_t i=0; i<frame.size; ++i) {
-					processtask(frame.ptask+i, wrk_info.pcash[frame.cid].framerep.ptask+i,
-							&wrk_info.pcash[frame.cid].spline);
-				}
-
-			wrk_info.psync[wrk_info.id].status = SEND;
+			frame_datareceive(psync->rcvid, &frame);	// parse received data
+			frame_repinit(&frame, &wrk_info.pcash[frame.cid].framerep);	// init reply message
+			for(size_t i=0; i<frame.size; ++i) {		// doing all tasks from client
+				processtask(frame.ptask+i, wrk_info.pcash[frame.cid].framerep.ptask+i,
+						&wrk_info.pcash[frame.cid].spline);
+			}
+			// reply client with results if not too late
+			if( wrk_info.psync[wrk_info.id].status != LATE ) {
+				wrk_info.psync[wrk_info.id].status = SEND;
 				frame_reply(psync->rcvid, &wrk_info.pcash[frame.cid].framerep);
-				frame_destroy(&wrk_info.pcash[frame.cid].framerep);
+			}
+			frame_destroy(&wrk_info.pcash[frame.cid].framerep);
 		}
 	}
 }
